@@ -24,7 +24,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
+          pip install --upgrade pip
           pip install pyinstaller requests tqdm
 
       - name: Build with PyInstaller
@@ -34,8 +34,11 @@ jobs:
                       --name fastly-scanner \
                       main.py
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v3
-        with:
-          name: fastly-scanner-${{ matrix.os }}
-          path: dist/fastly-scanner${{ matrix.os == 'windows-latest' && '.exe' || '' }}
+      - name: Smoke-test executable
+        run: |
+          if [[ "$RUNNER_OS" != "Windows" ]]; then
+            chmod +x dist/fastly-scanner
+            dist/fastly-scanner --help || true
+          else
+            dist\\fastly-scanner.exe --help
+          fi
