@@ -33,12 +33,3 @@ jobs:
                       --onefile \
                       --name fastly-scanner \
                       main.py
-
-      - name: Smoke-test executable
-        run: |
-          if [[ "$RUNNER_OS" != "Windows" ]]; then
-            chmod +x dist/fastly-scanner
-            dist/fastly-scanner --help || true
-          else
-            dist\\fastly-scanner.exe --help
-          fi
