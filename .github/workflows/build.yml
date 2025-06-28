@@ -1,31 +1,97 @@
-name: Build executables
+name: Build & Publish Release
 
 on:
   push:
-    branches: [ main ]
-  pull_request:
+    tags:
+      - 'v*.*.*'
 
 jobs:
   build:
+    runs-on: ubuntu-latest
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        python-version: ["3.10"]
-    runs-on: ${{ matrix.os }}
-
+        python-version: ['3.10']
+    outputs:
+      # export the artifact-name so the release job can pick it up
+      artifact-name: http-scanner-${{ matrix.os }}
     steps:
-      - name: Check out code
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v3
 
       - name: Set up Python
         uses: actions/setup-python@v4
-        with:
+        with: 
           python-version: ${{ matrix.python-version }}
 
-      - name: Install dependencies
+      - name: Install deps
         run: |
           pip install --upgrade pip
           pip install pyinstaller requests tqdm
 
-      - name: Build with PyInstaller
-        run: pyinstaller --noconfirm --onefile --name http-scanner main.py
+      - name: Build
+        shell: bash    # so backslashes work on all OSs
+        run: |
+          pyinstaller --noconfirm \
+                      --onefile \
+                      --name http-scanner \
+                      main.py
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.os }}
+          path: |
+            dist/http-scanner
+            dist/http-scanner.exe
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Linux artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ubuntu-latest
+      - name: Download macOS artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: macos-latest
+      - name: Download Windows artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-latest
+
+      - name: Create GitHub Release
+        id: create_release
+        uses: actions/create-release@v1
+        with:
+          tag_name: ${{ github.ref_name }}
+          release_name: Release ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Linux binary
+        uses: actions/upload-release-asset@v1
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./http-scanner
+          asset_name: http-scanner-linux
+          asset_content_type: application/octet-stream
+
+      - name: Upload macOS binary
+        uses: actions/upload-release-asset@v1
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./http-scanner
+          asset_name: http-scanner-macos
+          asset_content_type: application/octet-stream
+
+      - name: Upload Windows binary
+        uses: actions/upload-release-asset@v1
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./http-scanner.exe
+          asset_name: http-scanner-windows.exe
+          asset_content_type: application/octet-stream
