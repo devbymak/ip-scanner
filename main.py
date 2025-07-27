@@ -7,6 +7,7 @@ import multiprocessing
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 import csv
+import json
 
 import requests
 from tqdm import tqdm
@@ -28,6 +29,19 @@ CLOUDFLARE_CIDRS = [
     "190.93.240.0/20",  "197.234.240.0/22","198.41.128.0/17"
 ]
 
+def fetch_bunny_ips():
+    """
+    Fetch Bunny CDN IP addresses from their API.
+    Returns a list of IP addresses as strings.
+    """
+    try:
+        response = requests.get("https://bunnycdn.com/api/system/edgeserverlist", timeout=10)
+        response.raise_for_status()
+        return response.json()
+    except Exception as e:
+        print(f"Error fetching Bunny CDN IPs: {e}")
+        return []
+
 def generate_random_ips(networks, count):
     weights = [net.num_addresses for net in networks]
     chosen_nets = random.choices(networks, weights=weights, k=count)
@@ -39,6 +53,21 @@ def generate_random_ips(networks, count):
             offset = 0
         ips.append(net.network_address + offset)
     return ips
+
+def generate_random_ips_from_list(ip_list, count):
+    """
+    Generate random IPs from a list of individual IP addresses.
+    """
+    if len(ip_list) == 0:
+        return []
+    
+    # If count is greater than available IPs, return all IPs
+    if count >= len(ip_list):
+        return [ipaddress.IPv4Address(ip) for ip in ip_list]
+    
+    # Otherwise, randomly sample from the list
+    chosen_ips = random.sample(ip_list, count)
+    return [ipaddress.IPv4Address(ip) for ip in chosen_ips]
 
 def test_ip(ip, timeout):
     """
@@ -78,13 +107,24 @@ def check_ips(ips, workers, timeout):
     return responsive
 
 def main():
-    choice = input("Which network to test? [fastly/cloudflare]: ").strip().lower()
-    if choice not in {"fastly", "cloudflare"}:
-        print("Please enter 'fastly' or 'cloudflare'.")
+    choice = input("Which network to test? [fastly/cloudflare/bunny]: ").strip().lower()
+    if choice not in {"fastly", "cloudflare", "bunny"}:
+        print("Please enter 'fastly', 'cloudflare', or 'bunny'.")
         sys.exit(1)
 
-    cidr_list = FASTLY_CIDRS if choice == "fastly" else CLOUDFLARE_CIDRS
-    networks = [ipaddress.IPv4Network(c) for c in cidr_list]
+    if choice == "bunny":
+        print("Fetching Bunny CDN IP addresses...")
+        bunny_ips = fetch_bunny_ips()
+        if not bunny_ips:
+            print("Failed to fetch Bunny CDN IPs. Exiting.")
+            sys.exit(1)
+        print(f"Fetched {len(bunny_ips)} Bunny CDN IP addresses.")
+        networks = None
+        ip_list = bunny_ips
+    else:
+        cidr_list = FASTLY_CIDRS if choice == "fastly" else CLOUDFLARE_CIDRS
+        networks = [ipaddress.IPv4Network(c) for c in cidr_list]
+        ip_list = None
 
     try:
         count = int(input("Enter number of IPs to check: "))
@@ -120,12 +160,16 @@ def main():
             print("Invalid timeout; using default of 1 second.")
             timeout = 1.0
 
-    ips_to_test = generate_random_ips(networks, count)
+    if choice == "bunny":
+        ips_to_test = generate_random_ips_from_list(ip_list, count)
+    else:
+        ips_to_test = generate_random_ips(networks, count)
+    
     responsive = check_ips(ips_to_test, workers, timeout)
 
     # Prepare filename with timestamp
     now_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"responsive_ips_{now_str}.csv"
+    filename = f"responsive_ips_{choice}_{now_str}.csv"
 
     if responsive:
         print("\nResponsive IPs and timings:")
